@@ -40,7 +40,9 @@ function ProposalsPageInner() {
   const searchParams = useSearchParams();
 
   const search = searchParams.get("q") ?? "";
-  const stateFilter = (searchParams.get("state") ?? "all") as ProposalState | "all";
+  const stateFilter = (searchParams.get("state") ?? "all") as
+    | ProposalState
+    | "all";
   const sort = (searchParams.get("sort") ?? "newest") as SortOption;
 
   const [proposals, setProposals] = useState<ProposalSummary[]>([]);
@@ -74,10 +76,12 @@ function ProposalsPageInner() {
       sorted.sort((a, b) => (b.id > a.id ? 1 : b.id < a.id ? -1 : 0));
     } else if (sort === "most-votes") {
       sorted.sort((a, b) =>
-        Number((b.votesFor + b.votesAgainst) - (a.votesFor + a.votesAgainst))
+        Number(b.votesFor + b.votesAgainst - (a.votesFor + a.votesAgainst)),
       );
     } else if (sort === "ending-soon") {
-      sorted.sort((a, b) => (a.endLedger || Infinity) - (b.endLedger || Infinity));
+      sorted.sort(
+        (a, b) => (a.endLedger || Infinity) - (b.endLedger || Infinity),
+      );
     }
     return sorted;
   }, [proposals, stateFilter, search, sort]);
@@ -123,7 +127,10 @@ function ProposalsPageInner() {
             return;
           }
         } catch (indexerError) {
-          console.warn("Indexer failed, falling back to on-chain queries:", indexerError);
+          console.warn(
+            "Indexer failed, falling back to on-chain queries:",
+            indexerError,
+          );
         }
       }
 
@@ -175,7 +182,9 @@ function ProposalsPageInner() {
       }
 
       const results = await Promise.all(proposalPromises);
-      const validProposals = results.filter((p): p is ProposalSummary => p !== null);
+      const validProposals = results.filter(
+        (p): p is ProposalSummary => p !== null,
+      );
 
       if (append) {
         setProposals((prev) => [...prev, ...validProposals]);
@@ -215,7 +224,9 @@ function ProposalsPageInner() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Proposals</h1>
-          <p className="text-gray-500 mt-1">Vote on governance decisions for this protocol.</p>
+          <p className="text-gray-500 mt-1">
+            Vote on governance decisions for this protocol.
+          </p>
         </div>
         <Link
           href="/propose"
@@ -248,7 +259,11 @@ function ProposalsPageInner() {
       </div>
 
       {/* Status filter tabs */}
-      <div className="flex flex-wrap gap-2 mb-6" role="group" aria-label="Filter by status">
+      <div
+        className="flex flex-wrap gap-2 mb-6"
+        role="group"
+        aria-label="Filter by status"
+      >
         <button
           onClick={() => setParam("state", "all", "all")}
           className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
@@ -277,7 +292,9 @@ function ProposalsPageInner() {
       {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-          <p className="text-red-800 text-sm font-medium">Error loading proposals</p>
+          <p className="text-red-800 text-sm font-medium">
+            Error loading proposals
+          </p>
           <p className="text-red-600 text-sm mt-1">{error}</p>
         </div>
       )}
@@ -294,12 +311,25 @@ function ProposalsPageInner() {
       {/* Empty — no proposals at all */}
       {!loading && !error && proposals.length === 0 && (
         <div className="text-center py-16">
-          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          <svg
+            className="mx-auto h-12 w-12 text-gray-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
           </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No proposals</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by creating a new proposal.</p>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">
+            No proposals
+          </h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Get started by creating a new proposal.
+          </p>
           <div className="mt-6">
             <Link
               href="/propose"
@@ -314,7 +344,9 @@ function ProposalsPageInner() {
       {/* Empty — filters produced no results */}
       {!loading && !error && proposals.length > 0 && filtered.length === 0 && (
         <div className="text-center py-12">
-          <p className="text-gray-500 text-sm">No proposals match your current filters.</p>
+          <p className="text-gray-500 text-sm">
+            No proposals match your current filters.
+          </p>
           <button
             onClick={() => router.replace("?")}
             className="mt-3 text-indigo-600 text-sm hover:underline"
@@ -336,13 +368,20 @@ function ProposalsPageInner() {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-gray-400 mb-1">Proposal #{p.id.toString()}</p>
+                    <p className="text-xs text-gray-400 mb-1">
+                      Proposal #{p.id.toString()}
+                    </p>
                     <h2 className="text-lg font-semibold text-gray-900 truncate">
                       {p.description}
                     </h2>
                     <div className="mt-3 flex items-center gap-4 text-sm text-gray-500">
-                      <span>For: {(Number(p.votesFor) / 1e7).toLocaleString()}</span>
-                      <span>Against: {(Number(p.votesAgainst) / 1e7).toLocaleString()}</span>
+                      <span>
+                        For: {(Number(p.votesFor) / 1e7).toLocaleString()}
+                      </span>
+                      <span>
+                        Against:{" "}
+                        {(Number(p.votesAgainst) / 1e7).toLocaleString()}
+                      </span>
                     </div>
                   </div>
                   <span
