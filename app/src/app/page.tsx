@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { GovernorClient, ProposalState, Network } from "@nebgov/sdk";
 import { ErrorState } from "../components/ErrorState";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { ProposalCardSkeleton } from "../components/ui/ProposalCardSkeleton";
 import { useDebounce } from "../hooks/useDebounce";
 import { getErrorMessage, reportFrontendError } from "../lib/frontend-error";
@@ -451,18 +452,20 @@ function ProposalsPageInner() {
 
 export default function ProposalsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="max-w-4xl mx-auto px-4 py-8">
-          <div className="space-y-4">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <ProposalCardSkeleton key={i} />
-            ))}
+    <ErrorBoundary title="Proposals">
+      <Suspense
+        fallback={
+          <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="space-y-4">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <ProposalCardSkeleton key={i} />
+              ))}
+            </div>
           </div>
-        </div>
-      }
-    >
-      <ProposalsPageInner />
-    </Suspense>
+        }
+      >
+        <ProposalsPageInner />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
