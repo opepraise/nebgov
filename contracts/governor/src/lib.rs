@@ -769,7 +769,7 @@ impl GovernorContract {
         // using the active voting strategy (single token or multi-token weighted).
         let raw_weight: i128 = Self::compute_votes(&env, &voter, &proposal.start_ledger);
 
-        if raw_weight < 0 {
+        if raw_weight <= 0 {
             env.panic_with_error(GovernorError::ZeroVotingPower);
         }
 
@@ -837,7 +837,7 @@ impl GovernorContract {
 
         // Look up the voter's snapshot voting power at the proposal's start ledger
         let raw_weight: i128 = Self::compute_votes(&env, &voter, &proposal.start_ledger);
-        if raw_weight < 0 {
+        if raw_weight <= 0 {
             env.panic_with_error(GovernorError::ZeroVotingPower);
         }
 
