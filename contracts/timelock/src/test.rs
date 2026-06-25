@@ -937,3 +937,11 @@ fn test_update_execution_window_unauthorized() {
     // Should panic when unauthorized user tries to update
     client.update_execution_window(&unauthorized, &2000);
 }
+
+#[test]
+fn test_timelock_error_codes_snapshot() {
+    // Snapshot: each TimelockError variant maps to a stable u32.
+    assert_eq!(TimelockError::PredecessorNotDone as u32, 1);
+    assert_eq!(TimelockError::PredecessorNotFound as u32, 2);
+    assert_eq!(TimelockError::OperationExpired as u32, 3);
+}
