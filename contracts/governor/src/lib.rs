@@ -47,6 +47,8 @@ pub enum GovernorError {
     VotePeriodTooShort = 28,
     ExecutionWindowZero = 29,
     TooManyCalldataEntries = 30,
+    /// Vote was cast outside the proposal's Active voting window.
+    ProposalNotActive = 31,
 }
 
 /// Cross-contract interface for the Timelock contract.
@@ -316,6 +318,10 @@ pub enum DataKey {
     MaxProposalsPerPeriod,
     /// Period duration in ledgers for proposal rate limiting.
     ProposalPeriodDuration,
+    /// Cached timelock min_delay (seconds) written once at initialize time.
+    CachedTimelockDelay,
+    /// Cached timelock execution_window (seconds) written once at initialize time.
+    CachedExecutionWindow,
 }
 
 #[contract]
@@ -350,41 +356,38 @@ impl GovernorContract {
     /// - Additional buffer for safety
     fn extend_proposal_ttl(env: &Env, proposal_id: u64, proposal: &Proposal) {
         let current = env.ledger().sequence();
-        
-        // Get configuration from storage
+
         let grace_period: u32 = env
             .storage()
             .instance()
             .get(&DataKey::ProposalGracePeriod)
             .unwrap_or(120_960);
-        
-        // Get timelock delay and execution window
-        let timelock_addr: Option<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Timelock);
-        
-        let timelock_delay_ledgers: u32 = if let Some(addr) = timelock_addr {
-            let timelock = TimelockClient::new(env, &addr);
-            let delay_seconds = timelock.min_delay();
-            let execution_window_seconds = timelock.execution_window();
-            // Convert seconds to ledgers using the shared constant.
-            ((delay_seconds + execution_window_seconds) / Self::SECONDS_PER_LEDGER) as u32
-        } else {
-            1000 // conservative default
+
+        // Use cached timelock timing values (written at initialize time) to avoid
+        // repeated cross-contract calls. Falls back to live calls for pre-migration
+        // contracts that don't have the cache entries yet.
+        let cached_delay: Option<u64> = env.storage().instance().get(&DataKey::CachedTimelockDelay);
+        let cached_window: Option<u64> = env.storage().instance().get(&DataKey::CachedExecutionWindow);
+        let timelock_delay_ledgers: u32 = match (cached_delay, cached_window) {
+            (Some(d), Some(w)) => ((d + w) / Self::SECONDS_PER_LEDGER) as u32,
+            _ => {
+                let timelock_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Timelock)
+                    .unwrap_or_else(|| env.panic_with_error(GovernorError::TimelockNotSet));
+                let timelock = TimelockClient::new(env, &timelock_addr);
+                ((timelock.min_delay() + timelock.execution_window()) / Self::SECONDS_PER_LEDGER) as u32
+            }
         };
-        
-        // Calculate remaining ledgers until proposal end
+
         let ledgers_until_end = proposal.end_ledger.saturating_sub(current);
-        
-        // Total TTL: remaining voting period + grace period + timelock operations + buffer
-        // The buffer ensures we don't expire even if timing is tight
+
         let ttl_ledgers = ledgers_until_end
             .saturating_add(grace_period)
             .saturating_add(timelock_delay_ledgers)
-            .saturating_add(1000); // 1000 ledger safety buffer (~83 minutes)
-        
-        // Extend the TTL for the proposal storage entry
+            .saturating_add(1000);
+
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Proposal(proposal_id), ttl_ledgers, ttl_ledgers);
@@ -450,11 +453,18 @@ impl GovernorContract {
         if execution_window == 0 {
             env.panic_with_error(GovernorError::ExecutionWindowZero);
         }
+        let min_delay = timelock_client.min_delay();
         // timelock_delay + execution_window must not overflow u64
-        let _ = timelock_client
-            .min_delay()
+        let _ = min_delay
             .checked_add(execution_window)
             .unwrap_or_else(|| env.panic_with_error(GovernorError::ArithmeticOverflow));
+        // Cache timing values so extend_proposal_ttl can avoid repeated cross-contract calls.
+        env.storage()
+            .instance()
+            .set(&DataKey::CachedTimelockDelay, &min_delay);
+        env.storage()
+            .instance()
+            .set(&DataKey::CachedExecutionWindow, &execution_window);
 
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage()
@@ -765,6 +775,18 @@ impl GovernorContract {
 
         let mut proposal = Self::must_get_proposal(&env, proposal_id);
 
+        // Reject votes outside the Active window. Checking fields directly
+        // avoids a redundant storage read that Self::state() would incur.
+        let current = env.ledger().sequence();
+        if proposal.cancelled
+            || proposal.executed
+            || proposal.queued
+            || current < proposal.start_ledger
+            || current > proposal.end_ledger
+        {
+            env.panic_with_error(GovernorError::ProposalNotActive);
+        }
+
         // Look up the voter's snapshot voting power at the proposal's start ledger
         // using the active voting strategy (single token or multi-token weighted).
         let raw_weight: i128 = Self::compute_votes(&env, &voter, &proposal.start_ledger);
@@ -834,6 +856,17 @@ impl GovernorContract {
         }
 
         let mut proposal = Self::must_get_proposal(&env, proposal_id);
+
+        // Reject votes outside the Active window.
+        let current = env.ledger().sequence();
+        if proposal.cancelled
+            || proposal.executed
+            || proposal.queued
+            || current < proposal.start_ledger
+            || current > proposal.end_ledger
+        {
+            env.panic_with_error(GovernorError::ProposalNotActive);
+        }
 
         // Look up the voter's snapshot voting power at the proposal's start ledger
         let raw_weight: i128 = Self::compute_votes(&env, &voter, &proposal.start_ledger);
@@ -2314,6 +2347,9 @@ mod test {
 
         let proposal_id = propose_dummy(&env, &client, &proposer);
 
+        // voting_delay = 100: advance past start_ledger so the proposal is Active.
+        env.ledger().with_mut(|l| l.sequence_number += 101);
+
         let reason = String::from_str(&env, "I support this because it improves governance");
         client.cast_vote_with_reason(&voter, &proposal_id, &VoteSupport::For, &reason);
 
@@ -2398,6 +2434,9 @@ mod test {
         );
 
         let proposal_id = propose_dummy(&env, &client, &proposer);
+
+        // voting_delay = 100: advance past start_ledger so the proposal is Active.
+        env.ledger().with_mut(|l| l.sequence_number += 101);
 
         let reason1 = String::from_str(&env, "I agree with this proposal");
         let reason2 = String::from_str(&env, "I disagree with this proposal");
