@@ -82,6 +82,12 @@ impl LiquidityContract {
     }
 
     /// Add liquidity to a pool and mint LP shares.
+    ///
+    /// Returns `(lp_tokens, deposit_b)`. `deposit_b` is the amount of B actually
+    /// credited to the pool (equal to `required_b` for subsequent deposits, or
+    /// `amount_b` for the first deposit). Callers should use `deposit_b` to
+    /// reconcile their balance — any `amount_b` in excess of `deposit_b` was not
+    /// consumed.
     pub fn add_liquidity(
         env: Env,
         provider: Address,
@@ -89,14 +95,14 @@ impl LiquidityContract {
         outcome_b: u32,
         amount_a: i128,
         amount_b: i128,
-    ) -> i128 {
+    ) -> (i128, i128) {
         provider.require_auth();
 
         if amount_a <= 0 || amount_b <= 0 {
             panic!("amounts must be positive");
         }
 
-        if amount_a < MIN_LIQUIDITY || amount_b < MIN_LIQUIDITY {
+        if amount_a < MIN_LIQUIDITY {
             panic!("below minimum liquidity");
         }
 
@@ -111,13 +117,22 @@ impl LiquidityContract {
         // Only `required_b` is credited to the pool regardless of how large amount_b is,
         // preventing value extraction through inflated reserve_b contributions.
         let (lp_tokens, deposit_b) = if pool.total_lp_supply == 0 {
+            if amount_b < MIN_LIQUIDITY {
+                panic!("below minimum liquidity");
+            }
             (amount_a, amount_b)
         } else {
             let required_b = (amount_a * pool.reserve_b) / pool.reserve_a;
+            if required_b < MIN_LIQUIDITY {
+                panic!("below minimum liquidity");
+            }
             if amount_b < required_b {
                 panic!("imbalanced deposit: amount_b below required ratio");
             }
             let lp = (amount_a * pool.total_lp_supply) / pool.reserve_a;
+            if lp == 0 {
+                panic!("deposit too small: zero LP tokens would be minted");
+            }
             (lp, required_b)
         };
 
@@ -135,7 +150,7 @@ impl LiquidityContract {
         position.lp_tokens += lp_tokens;
         env.storage().persistent().set(&position_key, &position);
 
-        lp_tokens
+        (lp_tokens, deposit_b)
     }
 
     /// Remove liquidity from a pool and burn LP shares.

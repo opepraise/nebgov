@@ -79,8 +79,9 @@ fn test_add_liquidity_creates_pool_and_position() {
     let (env, contract_id, _, provider, _) = setup_liquidity();
     let client = LiquidityContractClient::new(&env, &contract_id);
 
-    let lp_tokens = client.add_liquidity(&provider, &0, &1, &10_000, &10_000);
+    let (lp_tokens, deposit_b) = client.add_liquidity(&provider, &0, &1, &10_000, &10_000);
     assert_eq!(lp_tokens, 10_000);
+    assert_eq!(deposit_b, 10_000);
 
     let pool = client.get_pool(&0, &1);
     assert_eq!(pool.reserve_a, 10_000);
@@ -329,11 +330,11 @@ fn test_add_liquidity_lp_tokens_minted_correctly_for_second_deposit() {
     let client = LiquidityContractClient::new(&env, &contract_id);
     let provider2 = Address::generate(&env);
 
-    let lp1 = client.add_liquidity(&provider, &0, &1, &10_000, &20_000);
+    let (lp1, _) = client.add_liquidity(&provider, &0, &1, &10_000, &20_000);
     assert_eq!(lp1, 10_000);
 
     // 5_000 A is 50% of reserve_a=10_000 → should mint 5_000 LP tokens
-    let lp2 = client.add_liquidity(&provider2, &0, &1, &5_000, &10_000);
+    let (lp2, _) = client.add_liquidity(&provider2, &0, &1, &5_000, &10_000);
     assert_eq!(lp2, 5_000);
 
     let pool = client.get_pool(&0, &1);
@@ -349,8 +350,9 @@ fn test_add_liquidity_first_deposit_accepts_any_ratio() {
     let (env, contract_id, _, provider, _) = setup_liquidity();
     let client = LiquidityContractClient::new(&env, &contract_id);
 
-    let lp = client.add_liquidity(&provider, &0, &1, &1_000, &99_000);
+    let (lp, deposit_b) = client.add_liquidity(&provider, &0, &1, &1_000, &99_000);
     assert_eq!(lp, 1_000);
+    assert_eq!(deposit_b, 99_000);
     let pool = client.get_pool(&0, &1);
     assert_eq!(pool.reserve_a, 1_000);
     assert_eq!(pool.reserve_b, 99_000);
@@ -393,6 +395,68 @@ fn test_add_liquidity_poc_attack_prevented() {
     // 10_000/11_000 of reserve_b=22_000 = 20_000 B
     assert_eq!(alice_a, 10_000);
     assert_eq!(alice_b, 20_000);
+}
+
+#[test]
+fn test_add_liquidity_returns_actual_deposit_b() {
+    // add_liquidity now returns (lp_tokens, deposit_b). deposit_b is the amount
+    // of B actually credited — equal to required_b, not the caller-supplied amount_b.
+    // Integrators must use deposit_b to reconcile their balance.
+    let (env, contract_id, _, provider, _) = setup_liquidity();
+    let client = LiquidityContractClient::new(&env, &contract_id);
+    let provider2 = Address::generate(&env);
+
+    client.add_liquidity(&provider, &0, &1, &10_000, &20_000); // ratio 1:2
+
+    // required_b = 5_000 * 20_000 / 10_000 = 10_000; caller passes 50_000 as slippage buffer
+    let (lp_tokens, deposit_b) = client.add_liquidity(&provider2, &0, &1, &5_000, &50_000);
+    assert_eq!(lp_tokens, 5_000);
+    assert_eq!(deposit_b, 10_000); // only proportional amount credited, not 50_000
+}
+
+#[test]
+#[should_panic(expected = "below minimum liquidity")]
+fn test_add_liquidity_rejects_required_b_below_minimum() {
+    // On a heavily skewed pool (large reserve_a, tiny reserve_b), required_b for
+    // a small deposit rounds down below MIN_LIQUIDITY. This must be rejected even
+    // when amount_b is well above MIN_LIQUIDITY (the old guard was insufficient).
+    let (env, contract_id, _, provider, _) = setup_liquidity();
+    let client = LiquidityContractClient::new(&env, &contract_id);
+    let provider2 = Address::generate(&env);
+
+    // Seed pool: 1_000_000 A vs 1_000 B (heavily skewed)
+    client.add_liquidity(&provider, &0, &1, &1_000_000, &1_000);
+    // required_b = 1_000 * 1_000 / 1_000_000 = 1 — below MIN_LIQUIDITY (1_000)
+    // amount_b = 5_000 passes the old guard but required_b does not
+    client.add_liquidity(&provider2, &0, &1, &1_000, &5_000);
+}
+
+#[test]
+#[should_panic(expected = "deposit too small: zero LP tokens would be minted")]
+fn test_add_liquidity_rejects_deposit_that_mints_zero_lp_tokens() {
+    // When reserve_a >> total_lp (which occurs after heavy A-in swaps), integer
+    // division in `lp = amount_a * total_lp / reserve_a` yields 0 even for a
+    // minimum-sized deposit. Without the guard the caller loses both amounts with
+    // no LP tokens to show for it.
+    //
+    // Setup (pool 2/3, separate from the test's default pool 0/1):
+    //   First deposit: 1_000 A + 1_000_000_000 B → total_lp = 1_000
+    //   Swap 1_000_000 A in:
+    //     amount_out = 1_000_000 * 1_000_000_000 / 1_001_000 = 999_000_999
+    //     fee        = 999_000_999 * 30 / 10_000 = 2_997_002
+    //     net_out    = 996_003_997
+    //     → reserve_a = 1_001_000, reserve_b = 3_996_003, total_lp = 1_000
+    //   Second deposit (1_000 A):
+    //     required_b = 1_000 * 3_996_003 / 1_001_000 = 3_992  (≥ MIN_LIQUIDITY ✓)
+    //     lp         = 1_000 * 1_000 / 1_001_000 = 0          (1_001_000 > 1_000_000)
+    let (env, contract_id, _, provider, _) = setup_liquidity();
+    let client = LiquidityContractClient::new(&env, &contract_id);
+    let provider2 = Address::generate(&env);
+
+    client.add_liquidity(&provider, &2, &3, &1_000, &1_000_000_000);
+    client.swap(&provider, &2, &3, &1_000_000, &0);
+    // amount_b = 4_000 ≥ required_b = 3_992; only lp = 0 triggers the panic
+    client.add_liquidity(&provider2, &2, &3, &1_000, &4_000);
 }
 
 // ============================================================================
