@@ -45,6 +45,7 @@ import {
   reportFrontendError,
 } from "../../../lib/frontend-error";
 import { ProposalDetailSkeleton } from "../../../components/ui/ProposalDetailSkeleton";
+import { CountdownTimer } from "../../../components/CountdownTimer";
 
 interface Props {
   params: { id: string };
@@ -77,6 +78,7 @@ const INITIAL_PROPOSAL = {
   votesFor: 0n,
   votesAgainst: 0n,
   votesAbstain: 0n,
+  startLedger: 0,
   endLedger: 0,
   proposer: "",
   quorum: 0n,
@@ -828,6 +830,14 @@ export default function ProposalDetailClient({ params }: Props) {
           <h2 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-4">
             Cast Your Vote
           </h2>
+
+          <div className="mb-4">
+            <CountdownTimer
+              state={proposal.state}
+              startLedger={proposal.startLedger}
+              endLedger={proposal.endLedger}
+            />
+          </div>
 
           {!isConnected ? (
             <div className="bg-indigo-50 dark:bg-slate-900/80 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-5 mb-4">
