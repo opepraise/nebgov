@@ -1328,7 +1328,7 @@ export class GovernorClient {
       const history: VotingHistoryEntry[] = [];
       for (const event of events.events) {
         if (!event.topic || event.topic.length < 2) continue;
-        
+
         // Check if voter matches (second topic)
         const voterTopic = scValToNative(event.topic[1]);
         if (String(voterTopic) !== voter) continue;
